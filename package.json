@@ -1,0 +1,18 @@
+{
+  "name": "multichat",
+  "version": "1.0.0",
+  "private": true,
+  "description": "One page showing Twitch, YouTube, Facebook and TikTok live chat together",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "playwright-core": "^1.62.1",
+    "tiktok-live-connector": "^2.4.3",
+    "tmi.js": "^1.8.5",
+    "ws": "^8.18.0",
+    "youtube-chat": "^2.2.0"
+  }
+}

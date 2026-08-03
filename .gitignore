@@ -1,0 +1,6 @@
+node_modules/
+fb-profile/
+*.png
+!docs/screenshot.png
+npm-debug.log*
+.env

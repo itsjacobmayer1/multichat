@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Multichat</title>
+<style>
+  :root {
+    --bg: #0e0e12;
+    --panel: #17171d;
+    --border: #26262e;
+    --text: #e8e8ec;
+    --muted: #8b8b96;
+    --twitch: #9146ff;
+    --youtube: #ff4438;
+    --tiktok: #25f4ee;
+    --facebook: #1877f2;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.4 "Segoe UI", system-ui, sans-serif;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 14px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    flex-wrap: wrap;
+    flex-shrink: 0;
+  }
+  header h1 { font-size: 14px; font-weight: 600; letter-spacing: .3px; }
+  #viewToggle {
+    margin-left: auto;
+    background: none;
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 4px 12px;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  #viewToggle:hover { border-color: var(--muted); }
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    color: var(--muted);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 2px 9px;
+  }
+  .pill .dot { width: 7px; height: 7px; border-radius: 50%; background: #555; }
+  .chan { color: var(--text); font-weight: 600; }
+  .pill .chan:not(:empty)::before, .colhead .chan:not(:empty)::before { content: " · "; color: var(--muted); font-weight: 400; }
+  .colhead .chan { text-transform: none; letter-spacing: 0; }
+  .pill.connected .dot { background: #2ecc71; }
+  .pill.connecting .dot, .pill.reconnecting .dot, .pill[data-state="waiting for live"] .dot { background: #f1c40f; }
+  .pill.error .dot { background: #e74c3c; }
+  .feed {
+    overflow-y: auto;
+    padding: 8px 12px 12px;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+  #merged { flex: 1; }
+  #split {
+    flex: 1;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    min-height: 0;
+  }
+  .col {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+    border-right: 1px solid var(--border);
+  }
+  .col:last-child { border-right: none; }
+  .colhead {
+    flex-shrink: 0;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .6px;
+    text-transform: uppercase;
+    padding: 6px 12px;
+    border-bottom: 1px solid var(--border);
+    background: var(--panel);
+  }
+  .colhead.twitch { color: var(--twitch); }
+  .colhead.youtube { color: var(--youtube); }
+  .colhead.tiktok { color: var(--tiktok); }
+  .colhead.facebook { color: var(--facebook); }
+  .col .feed { flex: 1; }
+  .msg {
+    padding: 3px 0;
+    word-wrap: break-word;
+    overflow-wrap: anywhere;
+  }
+  .badge {
+    display: inline-block;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: .5px;
+    border-radius: 4px;
+    padding: 1px 5px 2px;
+    margin-right: 7px;
+    vertical-align: 1px;
+  }
+  .badge.twitch { background: var(--twitch); color: #fff; }
+  .badge.youtube { background: var(--youtube); color: #fff; }
+  .badge.tiktok { background: var(--tiktok); color: #0e0e12; }
+  .badge.facebook { background: var(--facebook); color: #fff; }
+  .col .badge { display: none; }
+  .user { font-weight: 600; margin-right: 6px; }
+  .user.twitch { color: var(--twitch); }
+  .user.youtube { color: var(--youtube); }
+  .user.tiktok { color: var(--tiktok); }
+  .user.facebook { color: var(--facebook); }
+  #jump {
+    position: fixed;
+    bottom: 16px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--panel);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 6px 16px;
+    font-size: 13px;
+    cursor: pointer;
+    display: none;
+  }
+  @media (max-width: 900px) {
+    #split { grid-template-columns: repeat(2, 1fr); grid-template-rows: 1fr 1fr; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Multichat</h1>
+  <span class="pill" id="pill-twitch"><span class="dot"></span>Twitch<span class="chan"></span>: <span class="st">off</span></span>
+  <span class="pill" id="pill-youtube"><span class="dot"></span>YouTube<span class="chan"></span>: <span class="st">off</span></span>
+  <span class="pill" id="pill-tiktok"><span class="dot"></span>TikTok<span class="chan"></span>: <span class="st">off</span></span>
+  <span class="pill" id="pill-facebook"><span class="dot"></span>Facebook<span class="chan"></span>: <span class="st">off</span></span>
+  <button id="viewToggle">Split view</button>
+</header>
+<div id="merged" class="feed"></div>
+<div id="split" style="display:none">
+  <div class="col"><div class="colhead twitch">Twitch<span class="chan" id="colchan-twitch"></span></div><div class="feed" id="col-twitch"></div></div>
+  <div class="col"><div class="colhead youtube">YouTube<span class="chan" id="colchan-youtube"></span></div><div class="feed" id="col-youtube"></div></div>
+  <div class="col"><div class="colhead tiktok">TikTok<span class="chan" id="colchan-tiktok"></span></div><div class="feed" id="col-tiktok"></div></div>
+  <div class="col"><div class="colhead facebook">Facebook<span class="chan" id="colchan-facebook"></span></div><div class="feed" id="col-facebook"></div></div>
+</div>
+<button id="jump">Jump to latest ↓</button>
+<script>
+  const PLATFORMS = ['twitch', 'youtube', 'tiktok', 'facebook'];
+  const HISTORY_CAP = 400;   // messages kept in memory
+  const MERGED_CAP = 250;    // DOM nodes in merged feed
+  const COL_CAP = 150;       // DOM nodes per platform column
+
+  const merged = document.getElementById('merged');
+  const splitEl = document.getElementById('split');
+  const cols = {};
+  for (const p of PLATFORMS) cols[p] = document.getElementById('col-' + p);
+  const jump = document.getElementById('jump');
+  const toggleBtn = document.getElementById('viewToggle');
+
+  let view = localStorage.getItem('multichat-view') === 'merged' ? 'merged' : 'split';
+  const history = [];  // all messages, capped
+  const queue = [];    // messages waiting to be rendered (flushed once per frame)
+  let flushScheduled = false;
+
+  // Each scrollable feed remembers whether the user is stuck to the bottom.
+  for (const el of [merged, ...Object.values(cols)]) {
+    el.dataset.stick = '1';
+    el.addEventListener('scroll', () => {
+      const stuck = el.scrollTop + el.clientHeight >= el.scrollHeight - 40;
+      el.dataset.stick = stuck ? '1' : '0';
+      if (el === merged) jump.style.display = stuck ? 'none' : 'block';
+    }, { passive: true });
+  }
+  jump.addEventListener('click', () => { merged.scrollTop = merged.scrollHeight; });
+
+  function setPill(platform, state, label) {
+    const pill = document.getElementById('pill-' + platform);
+    if (!pill) return;
+    pill.className = 'pill ' + state.replace(/\s+/g, '-');
+    pill.dataset.state = state;
+    pill.querySelector('.st').textContent = state;
+    if (label !== undefined) {
+      pill.querySelector('.chan').textContent = label;
+      const colchan = document.getElementById('colchan-' + platform);
+      if (colchan) colchan.textContent = label;
+    }
+  }
+
+  function buildNode(m) {
+    const div = document.createElement('div');
+    div.className = 'msg';
+    const badge = document.createElement('span');
+    badge.className = 'badge ' + m.platform;
+    badge.textContent = m.platform === 'youtube' ? 'YT' :
+                        m.platform === 'twitch' ? 'TW' :
+                        m.platform === 'tiktok' ? 'TT' : 'FB';
+    div.appendChild(badge);
+    const user = document.createElement('span');
+    user.className = 'user ' + m.platform;
+    user.textContent = m.user;
+    if (m.platform === 'twitch' && m.color) user.style.color = m.color;
+    div.appendChild(user);
+    const text = document.createElement('span');
+    text.textContent = m.text;
+    div.appendChild(text);
+    return div;
+  }
+
+  function trim(el, cap) {
+    while (el.children.length > cap) el.removeChild(el.firstChild);
+  }
+
+  // Render everything queued in one pass, at most once per animation frame.
+  function flush() {
+    flushScheduled = false;
+    if (!queue.length) return;
+    const batch = queue.splice(0, queue.length);
+    if (view === 'merged') {
+      const frag = document.createDocumentFragment();
+      for (const m of batch) frag.appendChild(buildNode(m));
+      merged.appendChild(frag);
+      trim(merged, MERGED_CAP);
+      if (merged.dataset.stick === '1') merged.scrollTop = merged.scrollHeight;
+    } else {
+      const frags = {};
+      for (const m of batch) {
+        if (!cols[m.platform]) continue;
+        (frags[m.platform] = frags[m.platform] || document.createDocumentFragment())
+          .appendChild(buildNode(m));
+      }
+      for (const [p, frag] of Object.entries(frags)) {
+        cols[p].appendChild(frag);
+        trim(cols[p], COL_CAP);
+        if (cols[p].dataset.stick === '1') cols[p].scrollTop = cols[p].scrollHeight;
+      }
+    }
+  }
+
+  function enqueue(m) {
+    history.push(m);
+    if (history.length > HISTORY_CAP) history.shift();
+    queue.push(m);
+    if (queue.length > HISTORY_CAP) queue.shift();
+    if (!flushScheduled) {
+      flushScheduled = true;
+      requestAnimationFrame(flush);
+    }
+  }
+
+  function applyView() {
+    merged.style.display = view === 'merged' ? '' : 'none';
+    splitEl.style.display = view === 'split' ? '' : 'none';
+    if (view === 'merged') jump.style.display = 'none';
+    toggleBtn.textContent = view === 'merged' ? 'Split view' : 'Merged view';
+    // Rebuild the visible containers from history.
+    queue.length = 0;
+    if (view === 'merged') {
+      merged.replaceChildren();
+      const frag = document.createDocumentFragment();
+      for (const m of history.slice(-MERGED_CAP)) frag.appendChild(buildNode(m));
+      merged.appendChild(frag);
+      merged.dataset.stick = '1';
+      merged.scrollTop = merged.scrollHeight;
+    } else {
+      jump.style.display = 'none';
+      for (const p of PLATFORMS) {
+        cols[p].replaceChildren();
+        const frag = document.createDocumentFragment();
+        for (const m of history.filter((x) => x.platform === p).slice(-COL_CAP)) {
+          frag.appendChild(buildNode(m));
+        }
+        cols[p].appendChild(frag);
+        cols[p].dataset.stick = '1';
+        cols[p].scrollTop = cols[p].scrollHeight;
+      }
+    }
+  }
+
+  toggleBtn.addEventListener('click', () => {
+    view = view === 'merged' ? 'split' : 'merged';
+    localStorage.setItem('multichat-view', view);
+    applyView();
+  });
+
+  function connect() {
+    const ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host);
+    ws.onmessage = (ev) => {
+      const m = JSON.parse(ev.data);
+      if (m.type === 'chat') enqueue(m);
+      else if (m.type === 'status') setPill(m.platform, m.state, m.label);
+      else if (m.type === 'init') {
+        for (const [p, s] of Object.entries(m.status)) setPill(p, s, (m.labels || {})[p]);
+        for (const msg of m.recent) { history.push(msg); }
+        if (history.length > HISTORY_CAP) history.splice(0, history.length - HISTORY_CAP);
+        applyView();
+      }
+    };
+    ws.onclose = () => setTimeout(connect, 3000);
+  }
+  applyView();
+  connect();
+</script>
+</body>
+</html>

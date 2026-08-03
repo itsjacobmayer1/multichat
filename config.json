@@ -1,0 +1,19 @@
+{
+  "twitch": {
+    "channel": "xqc"
+  },
+  "youtube": {
+    "channelId": "UCSJ4gkVC6NrvII8umztf0Ow",
+    "videoId": ""
+  },
+  "tiktok": {
+    "username": "wwe"
+  },
+  "facebook": {
+    "liveUrl": "https://www.facebook.com/StoneMountain64/live_videos/",
+    "pageId": "",
+    "accessToken": "",
+    "liveVideoId": "",
+    "socialStreamSession": ""
+  }
+}
