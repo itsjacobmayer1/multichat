@@ -195,7 +195,6 @@ function startFacebook() {
 // fb-profile/ and reused headless from then on).
 function startFacebookBrowser(liveUrl) {
   const { chromium } = require('playwright-core');
-  const profileDir = path.join(__dirname, 'fb-profile');
   labels.facebook = liveUrl.replace(/^https?:\/\/(www\.)?facebook\.com\//, 'fb.com/').slice(0, 50);
   let lastMsgAt = 0;
   // Logged out, the page only renders a static preview of the newest comments,
@@ -210,6 +209,7 @@ function startFacebookBrowser(liveUrl) {
 
   const run = async () => {
     setStatus('facebook', 'connecting');
+    let browser;
     let ctx;
     let restarted = false;
     const timers = [];
@@ -219,26 +219,31 @@ function startFacebookBrowser(liveUrl) {
       timers.forEach(clearInterval);
       if (state) setStatus('facebook', state);
       try { if (ctx) await ctx.close(); } catch {}
+      try { if (browser) await browser.close(); } catch {}
       setTimeout(run, ms);
     };
     try {
       // Use whatever browser the host has: FB_BROWSER_CHANNEL to force one,
       // else Edge (Windows dev box) -> Chrome -> Playwright's own chromium.
-      const launchOpts = { headless: true, viewport: { width: 1280, height: 900 } };
+      // A FRESH context every launch matters: Facebook serves a reused
+      // logged-out profile the hard login wall (blank page, no comments).
       const channels = process.env.FB_BROWSER_CHANNEL
         ? [process.env.FB_BROWSER_CHANNEL]
         : ['msedge', 'chrome', undefined];
       let lastErr;
       for (const channel of channels) {
         try {
-          ctx = await chromium.launchPersistentContext(profileDir, { ...launchOpts, channel });
+          browser = await chromium.launch({ headless: true, channel });
           break;
         } catch (err) { lastErr = err; }
       }
-      if (!ctx) throw lastErr;
-      const page = ctx.pages()[0] || await ctx.newPage();
+      if (!browser) throw lastErr;
+      ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+      const page = await ctx.newPage();
 
+      page.on('pageerror', (e) => console.error('[facebook page]', String(e).slice(0, 200)));
       await page.exposeFunction('mcPush', (name, text) => {
+        if (process.env.FB_DEBUG) console.log('[facebook mcPush]', name, '|', String(text).slice(0, 60));
         name = String(name || '').replace(/\s+/g, ' ').trim().slice(0, 80);
         text = String(text || '').replace(/\s+/g, ' ').trim().slice(0, 500);
         // Strip the trailing relative timestamp FB appends ("...text2m").
@@ -279,27 +284,59 @@ function startFacebookBrowser(liveUrl) {
           new MutationObserver((muts) => {
             for (const m of muts) for (const n of m.addedNodes) extract(n);
           }).observe(document.body, { childList: true, subtree: true });
+          // Comment blocks can be part of the server-rendered HTML — already in
+          // the DOM before this observer starts, producing no mutations. Sweep
+          // the whole document now and periodically; the WeakSet dedupes.
+          extract(document.body);
+          setInterval(() => extract(document.body), 4000);
         };
         if (document.body) start();
         else document.addEventListener('DOMContentLoaded', start);
       });
 
+      // Some loads overlay a login dialog that keeps the content underneath
+      // from rendering — dismiss it after every navigation.
+      const closeLoginDialog = async () => {
+        try {
+          const btn = page.locator('div[role="dialog"] [aria-label="Close"]').first();
+          if (await btn.isVisible({ timeout: 2000 })) await btn.click();
+        } catch {}
+      };
+
       await page.goto(liveUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
-      await page.waitForTimeout(8000);
+      await page.waitForTimeout(5000);
+      await closeLoginDialog();
+      await page.waitForTimeout(5000);
       if (page.url().includes('/login')) return retry(300000, 'blocked (login redirect)');
       setStatus('facebook', lastMsgAt ? 'connected' : 'waiting for comments');
+      if (process.env.FB_DEBUG) {
+        const info = await page.evaluate(() => ({
+          url: location.href,
+          articles: document.querySelectorAll('[role="article"]').length,
+          textLen: document.body.innerText.length,
+          snippet: document.body.innerText.slice(0, 150).replace(/\n/g, ' | '),
+        })).catch((e) => String(e));
+        console.log('[facebook debug]', JSON.stringify(info));
+        await page.screenshot({ path: 'fbdebug.png' }).catch(() => {});
+      }
 
       // Poll: reload to refresh the comment preview; dedupe keeps only new ones.
       timers.push(setInterval(() => {
-        page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {});
+        page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 })
+          .then(() => page.waitForTimeout(4000))
+          .then(closeLoginDialog)
+          .catch(() => {});
       }, 45000));
 
       // Flip to connected when comments arrive; full restart if stale too long.
+      // Facebook serves some fresh sessions a blank walled variant — if a
+      // session never produces a single comment, reroll it quickly.
       const startedAt = Date.now();
       timers.push(setInterval(() => {
         const idle = Date.now() - Math.max(lastMsgAt, startedAt);
         if (lastMsgAt > startedAt && status.facebook !== 'connected') setStatus('facebook', 'connected');
-        if (idle > 15 * 60 * 1000) retry(5000, 'reconnecting');
+        if (lastMsgAt < startedAt && idle > 2 * 60 * 1000) retry(3000, 'reconnecting');
+        else if (idle > 15 * 60 * 1000) retry(5000, 'reconnecting');
       }, 30000));
 
       page.on('close', () => retry(30000, 'reconnecting'));
