@@ -168,11 +168,11 @@ function startTikTok() {
 }
 
 // ---------- Facebook ----------
-// Primary (deployable, fully server-side): Graph API with a Page access token.
-// Paste pageId + accessToken once; the server auto-detects when the page goes
-// live and attaches to that broadcast's comment stream. No browser, no
-// extension, nothing running on a PC.
-// Fallback: Social Stream Ninja relay (browser-extension capture).
+// Default: liveUrl, a logged-out headless browser on the page's /live_videos/
+// listing (no login, no token).
+// Or: Graph API with a Page access token. The server auto-detects when the
+// page goes live and attaches to that broadcast's comment stream.
+// Or: Social Stream Ninja relay (browser-extension capture).
 function startFacebook() {
   const cfg = config.facebook || {};
   const liveUrl = (cfg.liveUrl || '').trim();
@@ -180,19 +180,17 @@ function startFacebook() {
   const accessToken = (cfg.accessToken || '').trim();
   const pageId = (cfg.pageId || '').trim();
   const liveVideoId = (cfg.liveVideoId || '').trim();
-  const overrideUrl = process.env.FB_STREAM_URL; // test hook: point at a mock SSE stream
-  if (overrideUrl || (accessToken && (pageId || liveVideoId))) {
-    return startFacebookGraph({ accessToken, pageId, liveVideoId, overrideUrl });
+  if (accessToken && (pageId || liveVideoId)) {
+    return startFacebookGraph({ accessToken, pageId, liveVideoId });
   }
   const session = (cfg.socialStreamSession || '').trim();
   if (session) return startFacebookSocialStream(session);
   setStatus('facebook', 'off');
 }
 
-// No-API mode: a headless browser with a saved Facebook login watches the live
-// page and relays chat as it appears in the DOM. One-time setup: node fblogin.js
-// (opens a window, log in to Facebook, close it — the session is saved to
-// fb-profile/ and reused headless from then on).
+// No-login mode: a headless browser loads the page's public /live_videos/
+// listing, which shows the newest few comments on the current live, and relays
+// any new ones.
 function startFacebookBrowser(liveUrl) {
   const { chromium } = require('playwright-core');
   labels.facebook = liveUrl.replace(/^https?:\/\/(www\.)?facebook\.com\//, 'fb.com/').slice(0, 50);
@@ -349,9 +347,9 @@ function startFacebookBrowser(liveUrl) {
   run();
 }
 
-function startFacebookGraph({ accessToken, pageId, liveVideoId, overrideUrl }) {
+function startFacebookGraph({ accessToken, pageId, liveVideoId }) {
   const G = 'https://graph.facebook.com/v19.0';
-  labels.facebook = overrideUrl ? 'mock' : (pageId ? `page ${pageId}` : `video ${liveVideoId}`);
+  labels.facebook = pageId ? `page ${pageId}` : `video ${liveVideoId}`;
   if (pageId && accessToken) {
     fetch(`${G}/${pageId}?fields=name&access_token=${encodeURIComponent(accessToken)}`)
       .then((r) => r.json())
@@ -361,7 +359,6 @@ function startFacebookGraph({ accessToken, pageId, liveVideoId, overrideUrl }) {
 
   // Find the page's currently-live broadcast (unless a video id is pinned).
   const findLive = async () => {
-    if (overrideUrl) return 'mock';
     if (liveVideoId) return liveVideoId;
     const r = await fetch(`${G}/${pageId}/live_videos?fields=id,status&limit=10&access_token=${encodeURIComponent(accessToken)}`);
     const j = await r.json();
@@ -384,7 +381,7 @@ function startFacebookGraph({ accessToken, pageId, liveVideoId, overrideUrl }) {
       setStatus('facebook', 'waiting for live');
       return setTimeout(connect, 60000);
     }
-    const url = overrideUrl ||
+    const url =
       `https://streaming-graph.facebook.com/${vid}/live_comments` +
       `?access_token=${encodeURIComponent(accessToken)}` +
       `&comment_rate=one_per_two_seconds&fields=from{name},message`;

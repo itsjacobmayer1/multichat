@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "description": "One page showing Twitch, YouTube, Facebook and TikTok live chat together",
+  "license": "MIT",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
